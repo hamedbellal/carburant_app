@@ -1,90 +1,130 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prix Carburants France</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-    <div class="container mt-5">
-        <h1 class="text-center mb-4">⛽ Analyse des Prix du Carburant</h1>
-        
-        <div class="card">
-            <div class="card-body">
-                <form action="/recherche" method="POST">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label for="ville" class="form-label">🏙️ Ville</label>
-                            <input type="text" class="form-control" id="ville" name="ville" 
-                                placeholder="Ex: Paris, Lyon, Marseille...">
-                        </div>
-                        
-                        <div class="col-md-4">
-                            <label for="carburant" class="form-label">⛽ Type de carburant</label>
-                            <select class="form-select" id="carburant" name="carburant">
-                                <option value="">Tous les carburants</option>
-                                <option value="Gazole">Gazole</option>
-                                <option value="SP95">SP95</option>
-                                <option value="SP98">SP98</option>
-                                <option value="E10">E10</option>
-                                <option value="E85">E85</option>
-                                <option value="GPLc">GPLc</option>
-                            </select>
-                        </div>
+{% extends "base.html" %}
 
-                        <div class="col-md-4">
-                            <label for="departement" class="form-label">📍 Département</label>
-                            <input type="text" class="form-control" id="departement" name="departement" 
-                                placeholder="Ex: 75, 13, 69...">
-                        </div>
-                    </div>
-                    
-                    <div class="row g-3 mt-2">
-                        <div class="col-md-6">
-                            <label for="prix_min" class="form-label">💰 Prix minimum</label>
-                            <input type="number" step="0.001" class="form-control" id="prix_min" name="prix_min" 
-                                placeholder="Ex: 1.50">
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <label for="prix_max" class="form-label">💰 Prix maximum</label>
-                            <input type="number" step="0.001" class="form-control" id="prix_max" name="prix_max" 
-                                placeholder="Ex: 2.00">
-                        </div>
-                    </div>
-                    
-                    <div class="mt-3">
-                        <button type="submit" class="btn btn-primary">🔍 Lancer la recherche</button>
-                        <a href="/export-csv" class="btn btn-success">📥 Export CSV complet</a>
-                        <a href="/statistiques" class="btn btn-info">📊 Voir les statistiques</a>
-                    </div>
-                </form>
-            </div>
-        </div>
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="text-center mb-4">🔍 Analyse des Prix du Carburant en France</h1>
+        <p class="text-center lead">Consultez les prix des carburants en temps réel dans toute la France</p>
+    </div>
+</div>
 
-        <!-- Section informations -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">📊 Statistiques</h5>
-                        <p class="card-text">Application de visualisation des prix des carburants en France</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">ℹ️ Informations</h5>
-                        <p class="card-text">Données mises à jour régulièrement depuis data.gouv.fr</p>
-                    </div>
-                </div>
+<!-- Cartes de résumé -->
+<div class="row mb-5">
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-success h-100">
+            <div class="card-body text-center">
+                <h1 class="display-4">{{ total_stations }}</h1>
+                <p class="card-text">Stations</p>
             </div>
         </div>
     </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-info h-100">
+            <div class="card-body text-center">
+                <h1 class="display-4">6</h1>
+                <p class="card-text">Types de carburants</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-warning h-100">
+            <div class="card-body text-center">
+                <h1 class="display-4">{{ total_departments }}</h1>
+                <p class="card-text">Départements</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-danger h-100">
+            <div class="card-body text-center">
+                <h1 class="display-4">{{ avg_price_gazole | round(3) }}€</h1>
+                <p class="card-text">Prix moyen Gazole</p>
+            </div>
+        </div>
+    </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+<!-- Formulaire de recherche -->
+<div class="card shadow">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">🔎 Recherche avancée</h5>
+    </div>
+    <div class="card-body">
+        <form action="/recherche" method="POST">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="ville" class="form-label">🏙️ Ville</label>
+                    <input type="text" class="form-control" id="ville" name="ville" 
+                           placeholder="Ex: Paris, Lyon, Marseille...">
+                </div>
+                
+                <div class="col-md-4">
+                    <label for="carburant" class="form-label">⛽ Type de carburant</label>
+                    <select class="form-select" id="carburant" name="carburant">
+                        <option value="">Tous les carburants</option>
+                        <option value="Gazole">Gazole</option>
+                        <option value="SP95">SP95</option>
+                        <option value="SP98">SP98</option>
+                        <option value="E10">E10</option>
+                        <option value="E85">E85</option>
+                        <option value="GPLc">GPLc</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label for="departement" class="form-label">📍 Département</label>
+                    <input type="text" class="form-control" id="departement" name="departement" 
+                           placeholder="Ex: 75, 13, 69...">
+                </div>
+            </div>
+            
+            <div class="row g-3 mt-2">
+                <div class="col-md-6">
+                    <label for="prix_min" class="form-label">💰 Prix minimum</label>
+                    <input type="number" step="0.001" class="form-control" id="prix_min" name="prix_min" 
+                           placeholder="Ex: 1.50">
+                </div>
+                
+                <div class="col-md-6">
+                    <label for="prix_max" class="form-label">💰 Prix maximum</label>
+                    <input type="number" step="0.001" class="form-control" id="prix_max" name="prix_max" 
+                           placeholder="Ex: 2.00">
+                </div>
+            </div>
+            
+            <div class="mt-4 text-center">
+                <button type="submit" class="btn btn-primary btn-lg">🔍 Lancer la recherche</button>
+                <a href="/export-csv" class="btn btn-success btn-lg ms-2">📥 Export CSV complet</a>
+                <a href="/statistiques" class="btn btn-info btn-lg ms-2">📊 Voir les statistiques</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Section informations -->
+<div class="row mt-5">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">📈 À propos des données</h5>
+                <p class="card-text">Les données sont issues du flux instantané des prix des carburants 
+                publié par le gouvernement français sur data.gouv.fr</p>
+                <p class="card-text"><small class="text-muted">Mise à jour automatique quotidienne</small></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">ℹ️ Comment utiliser</h5>
+                <ul class="list-unstyled">
+                    <li>✅ Recherchez par ville, département ou carburant</li>
+                    <li>✅ Consultez les statistiques détaillées</li>
+                    <li>✅ Exportez les données en CSV</li>
+                    <li>✅ Visualisez les tendances de prix</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
