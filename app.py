@@ -229,26 +229,37 @@ def api_stations():
 @app.route('/export-csv')
 def export_csv():
     try:
-        # Préparer les données pour CSV
-        data = []
+        import csv
+        from io import StringIO
+        from flask import Response
+        
+        # Créer le CSV en mémoire
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # En-têtes
+        writer.writerow(['nom_station', 'ville', 'adresse', 'departement', 'type_carburant', 'prix', 'date_maj'])
+        
+        # Données
         for station in stations_data:
             for carburant in station.get('carburants', []):
-                data.append({
-                    'nom_station': station.get('nom', ''),
-                    'ville': station.get('ville', ''),
-                    'adresse': station.get('adresse', ''),
-                    'departement': station.get('code_departement', ''),
-                    'type_carburant': carburant['type'],
-                    'prix': carburant['prix'],
-                    'date_maj': carburant.get('date_maj', '')
-                })
+                writer.writerow([
+                    station.get('nom', ''),
+                    station.get('ville', ''),
+                    station.get('adresse', ''),
+                    station.get('code_departement', ''),
+                    carburant['type'],
+                    carburant['prix'],
+                    carburant.get('date_maj', '')
+                ])
         
-        # Créer DataFrame et exporter CSV
-        df = pd.DataFrame(data)
-        csv_filename = 'export_prix_carburant.csv'
-        df.to_csv(csv_filename, index=False)
-        
-        return send_file(csv_filename, as_attachment=True)
+        # Retourner le fichier
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-disposition": "attachment; filename=export_prix_carburant.csv"}
+        )
     
     except Exception as e:
         return f"Erreur lors de l'export: {str(e)}", 500
