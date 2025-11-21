@@ -1,17 +1,24 @@
 from flask import Flask, render_template, request, jsonify, send_file
-from pymongo import MongoClient
 import pandas as pd
 import json
 import time
 import random
-from bson import json_util
+import os
 
 app = Flask(__name__)
 
-# Connexion MongoDB
-def get_db():
-    client = MongoClient('mongodb://localhost:27017/')
-    return client['carburant_db']
+# Charger les données depuis le fichier JSON
+def load_stations_data():
+    try:
+        with open('data/stations.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("❌ Fichier data/stations.json non trouvé")
+        return []
+
+# Charger les données au démarrage
+stations_data = load_stations_data()
+print(f"✅ {len(stations_data)} stations chargées depuis JSON")
 
 # Route principale
 @app.route('/')
@@ -22,46 +29,51 @@ def index():
 @app.route('/recherche', methods=['POST'])
 def recherche():
     try:
-        db = get_db()
-        stations = db['stations']
-        
         # Récupérer tous les paramètres
-        ville = request.form.get('ville', '').strip()
+        ville = request.form.get('ville', '').strip().lower()
         carburant = request.form.get('carburant', '').strip()
         departement = request.form.get('departement', '').strip()
         prix_min = request.form.get('prix_min', '')
         prix_max = request.form.get('prix_max', '')
         
-        # Construire la requête MongoDB
-        query = {}
-        
-        if ville:
-            query['ville'] = {'$regex': ville, '$options': 'i'}
-        
-        if departement:
-            query['code_departement'] = departement
-        
-        if carburant:
-            query['carburants.type'] = carburant
+        # Filtrer les données
+        results = []
+        for station in stations_data:
+            match = True
             
-        # Filtre de prix avancé
-        if prix_min or prix_max:
-            prix_query = {}
-            if prix_min:
-                prix_query['$gte'] = float(prix_min)
-            if prix_max:
-                prix_query['$lte'] = float(prix_max)
+            # Filtre par ville
+            if ville and ville not in station.get('ville', '').lower():
+                match = False
             
-            query['carburants.prix'] = prix_query
-        
-        # Exécuter la requête
-        results = list(stations.find(query))
-        
-        # Convertir pour JSON
-        results_json = json.loads(json_util.dumps(results))
+            # Filtre par département
+            if departement and departement != station.get('code_departement', ''):
+                match = False
+            
+            # Filtre par carburant
+            if carburant:
+                has_carburant = any(c['type'] == carburant for c in station.get('carburants', []))
+                if not has_carburant:
+                    match = False
+            
+            # Filtre par prix
+            if prix_min or prix_max:
+                prix_min_val = float(prix_min) if prix_min else 0
+                prix_max_val = float(prix_max) if prix_max else float('inf')
+                
+                has_matching_price = False
+                for carb in station.get('carburants', []):
+                    if prix_min_val <= carb['prix'] <= prix_max_val:
+                        has_matching_price = True
+                        break
+                
+                if not has_matching_price:
+                    match = False
+            
+            if match:
+                results.append(station)
         
         return render_template('results.html', 
-                             results=results_json, 
+                             results=results, 
                              ville=ville, 
                              carburant=carburant,
                              departement=departement,
@@ -75,127 +87,82 @@ def recherche():
 @app.route('/statistiques')
 def statistiques():
     try:
-        db = get_db()
-        stations = db['stations']
-        
         # Statistiques générales
-        total_stations = stations.count_documents({})
+        total_stations = len(stations_data)
         
-        # Prix moyens par carburant
-        pipeline_prix = [
-            {"$unwind": "$carburants"},
-            {"$group": {
-                "_id": "$carburants.type", 
-                "moyenne": {"$avg": "$carburants.prix"},
-                "minimum": {"$min": "$carburants.prix"},
-                "maximum": {"$max": "$carburants.prix"},
-                "count": {"$sum": 1}
-            }}
-        ]
-        stats_prix = list(stations.aggregate(pipeline_prix))
+        # Calculer les statistiques de prix
+        stats_prix = {}
+        for station in stations_data:
+            for carburant in station.get('carburants', []):
+                type_carb = carburant['type']
+                prix = carburant['prix']
+                
+                if type_carb not in stats_prix:
+                    stats_prix[type_carb] = {'prix': [], 'count': 0}
+                
+                stats_prix[type_carb]['prix'].append(prix)
+                stats_prix[type_carb]['count'] += 1
+        
+        # Préparer les statistiques finales
+        stats_final = []
+        for type_carb, data in stats_prix.items():
+            prix_list = data['prix']
+            stats_final.append({
+                '_id': type_carb,
+                'moyenne': sum(prix_list) / len(prix_list),
+                'minimum': min(prix_list),
+                'maximum': max(prix_list),
+                'count': data['count']
+            })
         
         # Stations par département
-        pipeline_dep = [
-            {"$group": {"_id": "$code_departement", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 10}
-        ]
-        top_departements = list(stations.aggregate(pipeline_dep))
+        dept_count = {}
+        for station in stations_data:
+            dept = station.get('code_departement', 'Inconnu')
+            dept_count[dept] = dept_count.get(dept, 0) + 1
         
-        # Convertir les Decimal en float pour la sérialisation JSON
-        stats_prix_serializable = []
-        for stat in stats_prix:
-            stats_prix_serializable.append({
-                "_id": stat["_id"],
-                "moyenne": float(stat["moyenne"]) if stat["moyenne"] is not None else 0,
-                "minimum": float(stat["minimum"]) if stat["minimum"] is not None else 0,
-                "maximum": float(stat["maximum"]) if stat["maximum"] is not None else 0,
-                "count": stat["count"]
-            })
-        
-        top_departements_serializable = []
-        for dep in top_departements:
-            top_departements_serializable.append({
-                "_id": dep["_id"] if dep["_id"] else "Inconnu",
-                "count": dep["count"]
-            })
+        top_departements = [{'count': v, '_id': k} for k, v in 
+                           sorted(dept_count.items(), key=lambda x: x[1], reverse=True)[:10]]
         
         return render_template('statistiques.html',
                              total_stations=total_stations,
-                             stats_prix=stats_prix_serializable,
-                             top_departements=top_departements_serializable)
+                             stats_prix=stats_final,
+                             top_departements=top_departements)
     
     except Exception as e:
         return f"Erreur lors du calcul des statistiques: {str(e)}", 500
-#***********************************************************************************
 
-
-# Route pour la page performance
+# Route pour la page performance (version JSON)
 @app.route('/performance')
 def performance():
-    db = get_db()
-    stations = db['stations']
-    total_stations = stations.count_documents({})
+    total_stations = len(stations_data)
     return render_template('performance.html', total_stations=total_stations)
 
-# Route pour générer des données Big Data
+# Route pour générer des données Big Data (version JSON simplifiée)
 @app.route('/generate-big-data/<int:multiplier>')
 def generate_big_data_route(multiplier):
-    # Implémentation simplifiée pour la démo web
-    db = get_db()
-    stations = db['stations']
-    
-    original_count = stations.count_documents({"id_station": {"$not": {"$regex": "^BIG_"}}})
-    
     if multiplier > 10:
         return "⚠️ Multiplicateur trop élevé pour la version web. Utilisez le script en console.", 400
     
-    new_stations = []
-    station_id_counter = 1000000
-    
-    for i in range(multiplier - 1):
-        original_stations = list(stations.find({"id_station": {"$not": {"$regex": "^BIG_"}}}).limit(100))
-        
-        for station in original_stations:
-            new_station = station.copy()
-            new_station.pop('_id', None)
-            new_station['id_station'] = f"BIG_{station_id_counter}"
-            station_id_counter += 1
-            
-            # Modifier légèrement les prix
-            for carburant in new_station['carburants']:
-                variation = random.uniform(-0.05, 0.05)
-                carburant['prix'] = round(carburant['prix'] + variation, 3)
-            
-            new_stations.append(new_station)
-    
-    if new_stations:
-        stations.insert_many(new_stations)
-    
-    new_total = stations.count_documents({})
-    return f"✅ {len(new_stations)} nouvelles stations ajoutées. Total: {new_total}"
+    # Cette fonctionnalité n'est pas supportée en mode JSON simple
+    return "⚠️ Génération de données Big Data non disponible en mode JSON. Utilisez MongoDB pour cette fonctionnalité."
 
 # Route pour réinitialiser les données
 @app.route('/reset-data')
 def reset_data():
-    db = get_db()
-    stations = db['stations']
-    # Supprimer seulement les données générées (BIG_)
-    result = stations.delete_many({"id_station": {"$regex": "^BIG_"}})
-    remaining = stations.count_documents({})
-    return f"✅ {result.deleted_count} stations BIG DATA supprimées. Reste: {remaining} stations originales"
+    # Recharger les données originales
+    global stations_data
+    stations_data = load_stations_data()
+    return f"✅ Données réinitialisées. {len(stations_data)} stations chargées"
 
-# Route pour lancer les tests de performance
+# Route pour lancer les tests de performance (version JSON)
 @app.route('/run-tests')
 def run_tests():
-    db = get_db()
-    stations = db['stations']
-    
     tests = []
     
     # Test 1: Recherche simple
     start = time.time()
-    results = list(stations.find({"ville": "Paris"}))
+    results = [s for s in stations_data if 'paris' in s.get('ville', '').lower()]
     temps1 = time.time() - start
     tests.append({
         "nom": "Recherche Paris",
@@ -205,7 +172,7 @@ def run_tests():
     
     # Test 2: Recherche carburant
     start = time.time()
-    results = list(stations.find({"carburants.type": "Gazole"}))
+    results = [s for s in stations_data if any(c['type'] == 'Gazole' for c in s.get('carburants', []))]
     temps2 = time.time() - start
     tests.append({
         "nom": "Recherche Gazole", 
@@ -213,10 +180,22 @@ def run_tests():
         "resultats": f"{len(results)} stations"
     })
     
-    # Test 3: Agrégation
+    # Test 3: "Agrégation" (calcul manuel)
     start = time.time()
-    pipeline = [{"$unwind": "$carburants"}, {"$group": {"_id": "$carburants.type", "moyenne": {"$avg": "$carburants.prix"}}}]
-    results = list(stations.aggregate(pipeline))
+    prix_par_carburant = {}
+    for station in stations_data:
+        for carburant in station.get('carburants', []):
+            type_carb = carburant['type']
+            if type_carb not in prix_par_carburant:
+                prix_par_carburant[type_carb] = []
+            prix_par_carburant[type_carb].append(carburant['prix'])
+    
+    results = []
+    for type_carb, prix_list in prix_par_carburant.items():
+        results.append({
+            '_id': type_carb,
+            'moyenne': sum(prix_list) / len(prix_list)
+        })
     temps3 = time.time() - start
     tests.append({
         "nom": "Agrégation prix",
@@ -226,7 +205,7 @@ def run_tests():
     
     # Test 4: Compte total
     start = time.time()
-    count = stations.count_documents({})
+    count = len(stations_data)
     temps4 = time.time() - start
     tests.append({
         "nom": "Compte total",
@@ -238,15 +217,11 @@ def run_tests():
     
     return render_template('performance.html', tests=tests, total_stations=total_stations)
 
-
 # Route API pour les données JSON
 @app.route('/api/stations')
 def api_stations():
     try:
-        db = get_db()
-        stations = db['stations']
-        results = list(stations.find({}))
-        return json.loads(json_util.dumps(results))
+        return jsonify(stations_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -254,21 +229,18 @@ def api_stations():
 @app.route('/export-csv')
 def export_csv():
     try:
-        db = get_db()
-        stations = db['stations']
-        results = list(stations.find({}))
-        
         # Préparer les données pour CSV
         data = []
-        for station in results:
-            for carburant in station['carburants']:
+        for station in stations_data:
+            for carburant in station.get('carburants', []):
                 data.append({
-                    'nom_station': station['nom'],
-                    'ville': station['ville'],
-                    'adresse': station['adresse'],
+                    'nom_station': station.get('nom', ''),
+                    'ville': station.get('ville', ''),
+                    'adresse': station.get('adresse', ''),
+                    'departement': station.get('code_departement', ''),
                     'type_carburant': carburant['type'],
                     'prix': carburant['prix'],
-                    'date_maj': carburant['date_maj']
+                    'date_maj': carburant.get('date_maj', '')
                 })
         
         # Créer DataFrame et exporter CSV
@@ -282,7 +254,4 @@ def export_csv():
         return f"Erreur lors de l'export: {str(e)}", 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
-
-
-
+    app.run(debug=False, host='0.0.0.0', port=5000)
