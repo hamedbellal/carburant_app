@@ -37,7 +37,13 @@
     <div class="col-md-3 mb-3">
         <div class="card text-white bg-danger h-100">
             <div class="card-body text-center">
-                <h1 class="display-4">{{ avg_price_gazole | round(3) }}€</h1>
+                <h1 class="display-4">
+                    {% if avg_price_gazole %}
+                        {{ "%.3f"|format(avg_price_gazole) }}€
+                    {% else %}
+                        0.000€
+                    {% endif %}
+                </h1>
                 <p class="card-text">Prix moyen Gazole</p>
             </div>
         </div>
