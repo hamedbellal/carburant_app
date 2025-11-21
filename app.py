@@ -16,6 +16,34 @@ def load_stations_data():
         print("❌ Fichier data/stations.json non trouvé")
         return []
 
+def calculate_home_stats():
+    """Calcule les statistiques pour la page d'accueil"""
+    total_stations = len(stations_data)
+    
+    # Compter les départements uniques
+    departments = set()
+    avg_price_gazole = 0
+    gazole_count = 0
+    
+    for station in stations_data:
+        dept = station.get('code_departement')
+        if dept:
+            departments.add(dept)
+        
+        # Calculer le prix moyen du gazole
+        for carburant in station.get('carburants', []):
+            if carburant['type'] == 'Gazole':
+                avg_price_gazole += carburant['prix']
+                gazole_count += 1
+    
+    avg_price_gazole = avg_price_gazole / gazole_count if gazole_count > 0 else 0
+    
+    return {
+        'total_stations': total_stations,
+        'total_departments': len(departments),
+        'avg_price_gazole': avg_price_gazole
+    }
+
 # Charger les données au démarrage
 stations_data = load_stations_data()
 print(f"✅ {len(stations_data)} stations chargées depuis JSON")
@@ -23,7 +51,11 @@ print(f"✅ {len(stations_data)} stations chargées depuis JSON")
 # Route principale
 @app.route('/')
 def index():
-    return render_template('index.html')
+    stats = calculate_home_stats()
+    return render_template('index.html', 
+                         total_stations=stats['total_stations'],
+                         total_departments=stats['total_departments'],
+                         avg_price_gazole=stats['avg_price_gazole'])
 
 # Route pour la recherche avancée
 @app.route('/recherche', methods=['POST'])
@@ -265,4 +297,5 @@ def export_csv():
         return f"Erreur lors de l'export: {str(e)}", 500
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host='0.0.0.0', port=port)
